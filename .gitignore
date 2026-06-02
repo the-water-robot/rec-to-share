@@ -29,5 +29,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# appunti privati (NON committare)
+# appunti privati / segreti di handoff (NON committare)
 /GOOGLE-AUTH-NOTES.md
+/VERCEL-TOKEN.md

@@ -1,0 +1,5 @@
+# Non caricare segreti/appunti su Vercel (le env sono già nelle Project Settings)
+.env.local
+.env*.local
+GOOGLE-AUTH-NOTES.md
+VERCEL-TOKEN.md
