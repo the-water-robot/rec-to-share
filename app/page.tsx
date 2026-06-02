@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import Recorder from "@/components/Recorder";
 import { uploadOne } from "@/lib/upload";
 import {
@@ -35,6 +36,7 @@ export default function Home() {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [uploading, setUploading] = useState(false);
   const [folderLink, setFolderLink] = useState<string | null>(null);
+  const [doneFolder, setDoneFolder] = useState<{ id: string; name: string } | null>(null);
 
   const [pinProtected, setPinProtected] = useState(false);
   const [pin, setPin] = useState("");
@@ -81,6 +83,7 @@ export default function Home() {
       },
     ]);
     setFolderLink(null);
+    setDoneFolder(null);
   }, []);
 
   const onRecorded = useCallback(
@@ -146,6 +149,7 @@ export default function Home() {
         );
         patch(item.id, { status: "done", progress: 1, link: session.folderWebViewLink });
         setFolderLink(session.folderWebViewLink);
+        setDoneFolder({ id: session.folderId, name: session.folderName });
       } catch (e) {
         patch(item.id, {
           status: "error",
@@ -160,7 +164,7 @@ export default function Home() {
   const allDone = items.length > 0 && items.every((i) => i.status === "done");
 
   return (
-    <main className="mx-auto flex min-h-[100dvh] max-w-md flex-col gap-5 px-4 pb-32 pt-6">
+    <main className="mx-auto flex min-h-[100dvh] max-w-md flex-col gap-5 px-4 pb-[calc(9rem+env(safe-area-inset-bottom))] pt-6">
       <header className="flex items-center gap-3">
         <img src="/icons/icon.svg" alt="" width={48} height={48} className="rounded-xl" />
         <div>
@@ -311,20 +315,32 @@ export default function Home() {
         </section>
       )}
 
-      {folderLink && (
-        <a
-          href={folderLink}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-center text-sm font-medium text-sky underline-offset-4 hover:underline"
-        >
-          Apri la cartella su Google Drive ↗
-        </a>
+      {(doneFolder || folderLink) && (
+        <div className="flex flex-col items-center gap-2">
+          {doneFolder && (
+            <Link
+              href={`/prove/${doneFolder.id}?d=${encodeURIComponent(doneFolder.name)}`}
+              className="w-full rounded-xl border border-sky/40 bg-sky/10 px-4 py-3 text-center text-sm font-semibold text-sky transition active:scale-[0.99]"
+            >
+              ▸ Ascolta / info di questa prova
+            </Link>
+          )}
+          {folderLink && (
+            <a
+              href={folderLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm font-medium text-sand/60 underline-offset-4 hover:underline"
+            >
+              Apri la cartella su Google Drive ↗
+            </a>
+          )}
+        </div>
       )}
 
       {/* Barra azione fissa */}
       {pendingCount > 0 && (
-        <div className="fixed inset-x-0 bottom-0 border-t border-dark-border bg-dark-bg/90 px-4 py-3 backdrop-blur">
+        <div className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-40 border-t border-dark-border bg-dark-bg/90 px-4 py-3 backdrop-blur">
           <div className="mx-auto max-w-md">
             <button
               type="button"
@@ -341,7 +357,7 @@ export default function Home() {
       )}
 
       {allDone && !uploading && (
-        <div className="fixed inset-x-0 bottom-0 border-t border-lime/30 bg-dark-bg/90 px-4 py-4 text-center backdrop-blur">
+        <div className="fixed inset-x-0 bottom-[calc(3.5rem+env(safe-area-inset-bottom))] z-40 border-t border-lime/30 bg-dark-bg/90 px-4 py-4 text-center backdrop-blur">
           <p className="font-semibold text-lime">Tutto caricato ✓</p>
         </div>
       )}

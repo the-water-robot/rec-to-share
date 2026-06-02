@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import TabBar from "@/components/TabBar";
 
 export const metadata: Metadata = {
   title: "Prove — Animali Fantastici del Sud America",
@@ -49,7 +50,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <TabBar />
+      </body>
     </html>
   );
 }

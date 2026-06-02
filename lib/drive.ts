@@ -2,10 +2,12 @@
 // Non importare questo file da componenti client.
 import { OAuth2Client } from "google-auth-library";
 import { folderNameForDate } from "./format";
+import { defaultMeta, sanitizeMeta, type ProvaMeta } from "./band";
 
 const DRIVE = "https://www.googleapis.com/drive/v3";
 const UPLOAD = "https://www.googleapis.com/upload/drive/v3";
 const FOLDER_MIME = "application/vnd.google-apps.folder";
+const META_NAME = "_prova.json";
 
 function env(name: string): string {
   const v = process.env[name];
@@ -80,7 +82,14 @@ export async function ensureSessionFolder(dateIso?: string): Promise<SessionFold
   if (!createRes.ok) {
     throw new Error(`Drive (creazione cartella) ${createRes.status}: ${await createRes.text()}`);
   }
-  return (await createRes.json()) as SessionFolder;
+  const created = (await createRes.json()) as SessionFolder;
+  // Cartella nuova → crea subito il file dei metadati di default (best-effort: non blocca l'upload).
+  try {
+    await writeMeta(created.id, defaultMeta());
+  } catch (e) {
+    console.error("[ensureSessionFolder] writeMeta:", e);
+  }
+  return created;
 }
 
 /**
@@ -115,4 +124,111 @@ export async function createResumableSession(
     throw new Error("Google non ha restituito l'URL di sessione (header Location mancante).");
   }
   return location;
+}
+
+/* ─────────────────────────  Sezione "Prove": lista, streaming, metadati  ───────────────────────── */
+
+export interface DriveFolder {
+  id: string;
+  name: string;
+}
+export interface AudioFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+}
+
+/** Sottocartelle-prova dentro DRIVE_FOLDER_ID, dalla più recente. */
+export async function listRehearsalFolders(): Promise<DriveFolder[]> {
+  const token = await accessToken();
+  const parent = env("DRIVE_FOLDER_ID");
+  const q = `'${parent}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`;
+  const url =
+    `${DRIVE}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&orderBy=name desc` +
+    `&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+  const res = await driveFetch(token, url);
+  if (!res.ok) throw new Error(`Drive (lista cartelle) ${res.status}: ${await res.text()}`);
+  const j = (await res.json()) as { files?: DriveFolder[] };
+  return j.files ?? [];
+}
+
+/** File audio dentro una cartella, in ordine cronologico (l'orario è in testa al nome). */
+export async function listAudioFiles(folderId: string): Promise<AudioFile[]> {
+  const token = await accessToken();
+  const q = `'${folderId}' in parents and trashed = false and mimeType contains 'audio/'`;
+  const url =
+    `${DRIVE}/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,size)&orderBy=name` +
+    `&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+  const res = await driveFetch(token, url);
+  if (!res.ok) throw new Error(`Drive (lista file) ${res.status}: ${await res.text()}`);
+  const j = (await res.json()) as { files?: { id: string; name: string; mimeType: string; size?: string }[] };
+  return (j.files ?? []).map((f) => ({
+    id: f.id,
+    name: f.name,
+    mimeType: f.mimeType,
+    size: Number(f.size ?? 0),
+  }));
+}
+
+/** Stream del contenuto di un file da Drive, inoltrando l'header Range (per <audio> con seek). */
+export async function streamFile(id: string, range?: string | null): Promise<Response> {
+  const token = await accessToken();
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  if (range) headers.Range = range;
+  return fetch(`${DRIVE}/files/${id}?alt=media&supportsAllDrives=true`, { headers });
+}
+
+async function findFileByName(token: string, folderId: string, name: string): Promise<string | null> {
+  const q = `name = '${name.replace(/'/g, "\\'")}' and '${folderId}' in parents and trashed = false`;
+  const url =
+    `${DRIVE}/files?q=${encodeURIComponent(q)}&fields=files(id)&pageSize=1` +
+    `&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+  const res = await driveFetch(token, url);
+  if (!res.ok) throw new Error(`Drive (ricerca file) ${res.status}: ${await res.text()}`);
+  const j = (await res.json()) as { files?: { id: string }[] };
+  return j.files && j.files.length ? j.files[0].id : null;
+}
+
+/** Legge i metadati della prova (_prova.json). Se manca, ritorna i default. */
+export async function readMeta(folderId: string): Promise<ProvaMeta> {
+  const token = await accessToken();
+  const fileId = await findFileByName(token, folderId, META_NAME);
+  if (!fileId) return defaultMeta();
+  const res = await driveFetch(token, `${DRIVE}/files/${fileId}?alt=media&supportsAllDrives=true`);
+  if (!res.ok) return defaultMeta();
+  try {
+    return sanitizeMeta(await res.json());
+  } catch {
+    return defaultMeta();
+  }
+}
+
+/** Crea o aggiorna _prova.json dentro la cartella. */
+export async function writeMeta(folderId: string, meta: ProvaMeta): Promise<void> {
+  const token = await accessToken();
+  const body = JSON.stringify(meta, null, 2);
+  const existing = await findFileByName(token, folderId, META_NAME);
+
+  if (existing) {
+    const res = await fetch(`${UPLOAD}/files/${existing}?uploadType=media&supportsAllDrives=true`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body,
+    });
+    if (!res.ok) throw new Error(`Drive (update meta) ${res.status}: ${await res.text()}`);
+    return;
+  }
+
+  const boundary = `afdsa-meta-${Date.now()}`;
+  const metadata = JSON.stringify({ name: META_NAME, parents: [folderId], mimeType: "application/json" });
+  const multipart =
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n` +
+    `--${boundary}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${boundary}--`;
+  const res = await fetch(`${UPLOAD}/files?uploadType=multipart&supportsAllDrives=true`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": `multipart/related; boundary=${boundary}` },
+    body: multipart,
+  });
+  if (!res.ok) throw new Error(`Drive (create meta) ${res.status}: ${await res.text()}`);
 }

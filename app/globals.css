@@ -34,4 +34,28 @@ body {
   .label {
     @apply mb-1.5 block text-sm font-medium text-sand/70;
   }
+
+  /* Chip selezionabile (presenti, birre, mood…) */
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm font-medium
+      transition active:scale-95 select-none;
+  }
+  .chip-off {
+    @apply border-dark-border bg-dark-bg/50 text-sand/60;
+  }
+  .chip-on {
+    @apply border-transparent bg-sky/20 text-sky ring-1 ring-sky/40;
+  }
+
+  /* Badge di sola lettura */
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium;
+  }
+}
+
+@layer utilities {
+  /* Spazio per non finire sotto la tab bar fissa */
+  .pb-tabbar {
+    padding-bottom: calc(4.5rem + env(safe-area-inset-bottom));
+  }
 }
